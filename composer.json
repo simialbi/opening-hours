@@ -1,21 +1,27 @@
 {
-    "name": "spatie/opening-hours",
-    "description": "A helper to query and format a set of opening hours",
+    "name": "simialbi/opening-hours",
+    "description": "A helper to query and format a set of opening hours based on Opening hours by spatie",
     "keywords": [
-        "spatie",
         "opening-hours",
         "schedule",
         "opening",
         "hours"
     ],
-    "homepage": "https://github.com/spatie/opening-hours",
     "license": "MIT",
+    "support": {
+        "issues": "https://github.com/simialbi/opening-hours/issues",
+        "source": "https://github.com/simialbi/opening-hours"
+    },
     "authors": [
         {
             "name": "Sebastian De Deyne",
             "email": "sebastian@spatie.be",
             "homepage": "https://spatie.be",
             "role": "Developer"
+        },
+        {
+            "name": "Simon Karlen",
+            "email": "simi.albi@gmail.com"
         }
     ],
     "require": {
@@ -33,11 +39,5 @@
         "psr-4": {
             "Spatie\\OpeningHours\\Test\\": "tests"
         }
-    },
-    "scripts": {
-        "test": "vendor/bin/phpunit"
-    },
-    "config": {
-        "sort-packages": true
     }
 }
