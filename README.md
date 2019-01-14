@@ -1,6 +1,6 @@
 # A helper to query and format a set of opening hours
 
-[![Latest Version on Packagist](https://img.shields.io/packagist/v/spatie/opening-hours.svg?style=flat-square)](https://packagist.org/packages/spatie/opening-hours)
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/simialbi/opening-hours.svg?style=flat-square)](https://packagist.org/packages/simialbi/opening-hours)
 [![Software License](https://img.shields.io/badge/license-MIT-brightgreen.svg?style=flat-square)](LICENSE.md)
 [![Build Status](https://img.shields.io/travis/spatie/opening-hours/master.svg?style=flat-square)](https://travis-ci.org/spatie/opening-hours)
 [![Quality Score](https://img.shields.io/scrutinizer/g/spatie/opening-hours.svg?style=flat-square)](https://scrutinizer-ci.com/g/spatie/opening-hours)
