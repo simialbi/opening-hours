@@ -634,6 +634,10 @@ class OpeningHours
             $nextOpen = $openingHoursForDay->nextOpen(Time::fromDateTime($dateTime));
         }
 
+        if (!$nextOpen) {
+            return false;
+        }
+
         $nextDateTime = $nextOpen->toDateTime();
         $dateTime = $dateTime->setTime($nextDateTime->format('G'), $nextDateTime->format('i'), 0);
 
