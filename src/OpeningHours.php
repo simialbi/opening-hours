@@ -624,7 +624,7 @@ class OpeningHours
         $openingHoursForDay = $this->forDate($dateTime);
         $nextOpen = $openingHoursForDay->nextOpen(Time::fromDateTime($dateTime));
 
-        while ($nextOpen === false) {
+        for ($i = 0; $nextOpen === false && $i < 7; $i++) {
             $dateTime = $dateTime
                 ->modify('+1 day')
                 ->setTime(0, 0, 0);
