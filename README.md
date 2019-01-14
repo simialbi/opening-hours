@@ -3,7 +3,6 @@
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/spatie/opening-hours.svg?style=flat-square)](https://packagist.org/packages/spatie/opening-hours)
 [![Software License](https://img.shields.io/badge/license-MIT-brightgreen.svg?style=flat-square)](LICENSE.md)
 [![Build Status](https://img.shields.io/travis/spatie/opening-hours/master.svg?style=flat-square)](https://travis-ci.org/spatie/opening-hours)
-[![SensioLabsInsight](https://img.shields.io/sensiolabs/i/082347b4-a3f6-4b77-b8a1-6a64d50232f7.svg?style=flat-square)](https://insight.sensiolabs.com/projects/082347b4-a3f6-4b77-b8a1-6a64d50232f7)
 [![Quality Score](https://img.shields.io/scrutinizer/g/spatie/opening-hours.svg?style=flat-square)](https://scrutinizer-ci.com/g/spatie/opening-hours)
 [![StyleCI](https://styleci.io/repos/69368104/shield?branch=master)](https://styleci.io/repos/69368104)
 [![Total Downloads](https://img.shields.io/packagist/dt/spatie/opening-hours.svg?style=flat-square)](https://packagist.org/packages/spatie/opening-hours)
@@ -14,18 +13,18 @@ A set of opening hours is created by passing in a regular schedule, and a list o
 
 ```php
 $openingHours = OpeningHours::create([
-    'monday' => ['09:00-12:00', '13:00-18:00'],
-    'tuesday' => ['09:00-12:00', '13:00-18:00'],
-    'wednesday' => ['09:00-12:00'],
-    'thursday' => ['09:00-12:00', '13:00-18:00'],
-    'friday' => ['09:00-12:00', '13:00-20:00'],
-    'saturday' => ['09:00-12:00', '13:00-16:00'],
-    'sunday' => [],
+    'monday'     => ['09:00-12:00', '13:00-18:00'],
+    'tuesday'    => ['09:00-12:00', '13:00-18:00'],
+    'wednesday'  => ['09:00-12:00'],
+    'thursday'   => ['09:00-12:00', '13:00-18:00'],
+    'friday'     => ['09:00-12:00', '13:00-20:00'],
+    'saturday'   => ['09:00-12:00', '13:00-16:00'],
+    'sunday'     => [],
     'exceptions' => [
         '2016-11-11' => ['09:00-12:00'],
         '2016-12-25' => [],
-        '01-01' => [], // Recurring on each 1st of january
-        '12-25' => ['09:00-12:00'], // Recurring on each 25th of december
+        '01-01'      => [],                // Recurring on each 1st of January
+        '12-25'      => ['09:00-12:00'],   // Recurring on each 25th of December
     ],
 ]);
 ```
@@ -69,15 +68,104 @@ $openingHours->forDate(new DateTime('2016-12-25'));
 $openingHours->exceptions();
 ```
 
-It can also return next open `DateTime` from the given `DateTime`.
+You can add data in definitions then retrieve them:
 
-```
-// 2016-12-26 09:00:00
-$nextOpen = $openingHours->nextOpen(new DateTime('2016-12-25 10:00:00'));
+```php
+$openingHours = OpeningHours::create([
+    'monday' => [
+        'data' => 'Typical Monday',
+        '09:00-12:00',
+        '13:00-18:00',
+    ],
+    'tuesday' => [
+        '09:00-12:00',
+        '13:00-18:00',
+        [
+            '19:00-21:00',
+            'data' => 'Extra on Tuesday evening',
+        ],
+    ],
+    'exceptions' => [
+        '2016-12-25' => [
+            'data' => 'Closed for Christmas',
+        ],
+    ],
+]);
 
-// 2016-12-24 13:00:00
-$nextOpen = $openingHours->nextOpen(new DateTime('2016-12-24 11:00:00'));
+echo $openingHours->forDay('monday')->getData(); // Typical Monday
+echo $openingHours->forDate(new DateTime('2016-12-25'))->getData(); // Closed for Christmas
+echo $openingHours->forDay('tuesday')[2]->getData(); // Extra on Tuesday evening
 ```
+
+In the example above, data are strings but it can be any kind of value. So you can embed multiple properties in an array.
+
+For structure convenience, the data-hours couple can be a fully-associative array, so the example above is strictly equivalent to the following:
+
+```php
+$openingHours = OpeningHours::create([
+    'monday' => [
+        'hours' => [
+            '09:00-12:00',
+            '13:00-18:00',
+        ],
+        'data' => 'Typical Monday',
+    ],
+    'tuesday' => [
+        ['hours' => '09:00-12:00'],
+        ['hours' => '13:00-18:00'],
+        ['hours' => '19:00-21:00', 'data' => 'Extra on Tuesday evening'],
+    ],
+    'exceptions' => [
+        '2016-12-25' => [
+            'hours' => [],
+            'data'  => 'Closed for Christmas',
+        ],
+    ],
+]);
+```
+
+The last structure tool is the filter, it allows you to pass closures (or callable function/method reference) that take a date as a parameter and returns the settings for the given date.
+
+```php
+$openingHours = OpeningHours::create([
+    'monday' => [
+       '09:00-12:00',
+    ],
+    'filters' => [
+        function ($date) {
+            $year         = intval($date->format('Y'));
+            $easterMonday = new DateTimeImmutable('2018-03-21 +'.(easter_days($year) + 1).'days');
+            if ($date->format('m-d') === $easterMonday->format('m-d')) {
+                return []; // Closed on Easter Monday
+                // Any valid exception-array can be returned here (range of hours, with or without data) 
+            }
+            // Else the filter does not apply to the given date
+        },
+    ],
+]);
+```
+
+If a callable is found in the `"exceptions"` property, it will be added automatically to filters so you can mix filters and exceptions both in the **exceptions** array. The first filter that returns a non-null value will have precedence over the next filters and the **filters** array has precedence over the filters inside the **exceptions** array.
+
+Warning: We will loop on all filters for each date from which we need to retrieve opening hours and can neither predicate nor cache the result (can be a random function) so you must be careful with filters, too many filters or long process inside filters can have a significant impact on the performance.
+
+It can also return the next open or close `DateTime` from a given `DateTime`.
+
+```php
+// The next open datetime is tomorrow morning, because we’re closed on 25th of December.
+$nextOpen = $openingHours->nextOpen(new DateTime('2016-12-25 10:00:00')); // 2016-12-26 09:00:00
+
+// The next open datetime is this afternoon, after the lunch break.
+$nextOpen = $openingHours->nextOpen(new DateTime('2016-12-24 11:00:00')); // 2016-12-24 13:00:00
+
+
+// The next close datetime is at noon.
+$nextClose = $openingHours->nextClose(new DateTime('2016-12-24 10:00:00')); // 2016-12-24 12:00:00
+
+// The next close datetime is tomorrow at noon, because we’re closed on 25th of December.
+$nextClose = $openingHours->nextClose(new DateTime('2016-12-25 15:00:00')); // 2016-12-26 12:00:00
+```
+
 Read the usage section for the full api.
 
 Spatie is a webdesign agency based in Antwerp, Belgium. You'll find an overview of all our open source projects [on our website](https://spatie.be/opensource).
@@ -105,6 +193,21 @@ $openingHours = OpeningHours::create([
     'monday' => ['09:00-12:00', '13:00-18:00'],
     // ...
 ]);
+```
+
+#### `OpeningHours::mergeOverlappingRanges(array $schedule) : array`
+
+For safety sake, creating `OpeningHours` object with overlapping ranges will throw an exception. But you can explicitly merge them.
+
+``` php
+$ranges = [
+  'monday' => ['08:00-11:00', '10:00-12:00'],
+];
+$mergedRanges = OpeningHours::mergeOverlappingRanges($ranges); // Monday becomes ['08:00-12:00']
+
+OpeningHours::create($mergedRanges);
+// Or use the following shortcut to create from ranges that possibly overlap:
+OpeningHours::createAndMergeOverlappingRanges($ranges);
 ```
 
 Not all days are mandatory, if a day is missing, it will be set as closed.
@@ -162,7 +265,7 @@ $openingHours->exceptions();
 
 #### `OpeningHours::isOpenOn(string $day): bool`
 
-Checks if the business is op on a day in the regular schedule.
+Checks if the business is open on a day in the regular schedule.
 
 ```php
 $openingHours->isOpenOn('saturday');
@@ -216,21 +319,29 @@ Returns next open DateTime from the given DateTime
 $openingHours->nextOpen(new DateTime('2016-12-24 11:00:00'));
 ```
 
+#### `nextClose(DateTimeInterface $dateTime) : DateTime`
+
+Returns next close DateTime from the given DateTime
+
+```php
+$openingHours->nextClose(new DateTime('2016-12-24 11:00:00'));
+```
+
 ### `Spatie\OpeningHours\OpeningHoursForDay`
 
 This class is meant as read-only. It implements `ArrayAccess`, `Countable` and `IteratorAggregate` so you can process the list of `TimeRange`s in an array-like way.
 
 ### `Spatie\OpeningHours\TimeRange`
 
-Value object describing a period with a start and an end time. Can be casted to a string in a `H:i-H:i` format.
+Value object describing a period with a start and an end time. Can be cast to a string in a `H:i-H:i` format.
 
 ### `Spatie\OpeningHours\Time`
 
-Value object describing a single time. Can be casted to a string in a `H:i` format.
+Value object describing a single time. Can be cast to a string in a `H:i` format.
 
 ## Changelog
 
-Please see [CHANGELOG](CHANGELOG.md) for more information what has changed recently.
+Please see [CHANGELOG](CHANGELOG.md) for more information about what has changed recently.
 
 ## Testing
 

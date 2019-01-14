@@ -1,6 +1,16 @@
 # Changelog
 
-All Notable changes to `opening-hours` will be documented in this file
+All notable changes to `opening-hours` will be documented in this file
+
+## 1.8.1 - 2018-10-18
+
+- overspilling timerange will now contain start time
+
+## 1.8.0 - 2018-09-17
+- Added `nextClose`
+
+## 1.7.0 - 2018-08-02
+- Added additional helpers on `Time`
 
 ## 1.6.0 - 2018-03-26
 - Added the ability to pass a `DateTime` instance to mutate to `Time::toDateTime`

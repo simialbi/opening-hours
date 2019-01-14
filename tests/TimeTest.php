@@ -3,16 +3,17 @@
 namespace Spatie\OpeningHours\Test;
 
 use DateTime;
+use DateTimeImmutable;
+use Spatie\OpeningHours\Time;
 use PHPUnit\Framework\TestCase;
 use Spatie\OpeningHours\Exceptions\InvalidTimeString;
-use Spatie\OpeningHours\Time;
 
 class TimeTest extends TestCase
 {
     /** @test */
     public function it_can_be_created_from_a_string()
     {
-        $this->assertEquals('16:00', (string)Time::fromString('16:00'));
+        $this->assertEquals('16:00', (string) Time::fromString('16:00'));
     }
 
     /** @test */
@@ -28,7 +29,11 @@ class TimeTest extends TestCase
     {
         $dateTime = new DateTime('2016-09-27 16:00:00');
 
-        $this->assertEquals('16:00', (string)Time::fromDateTime($dateTime));
+        $this->assertEquals('16:00', (string) Time::fromDateTime($dateTime));
+
+        $dateTime = new DateTimeImmutable('2016-09-27 16:00:00');
+
+        $this->assertEquals('16:00', (string) Time::fromDateTime($dateTime));
     }
 
     /** @test */
@@ -76,7 +81,7 @@ class TimeTest extends TestCase
     {
         $dateTime = date_create_immutable('2012-11-06 13:25:59.123456');
 
-        $this->assertEquals('13:25', (string)Time::fromDateTime($dateTime));
+        $this->assertEquals('13:25', (string) Time::fromDateTime($dateTime));
     }
 
     /** @test */
@@ -85,5 +90,40 @@ class TimeTest extends TestCase
         $this->assertEquals('09:00', Time::fromString('09:00')->format());
         $this->assertEquals('09:00', Time::fromString('09:00')->format('H:i'));
         $this->assertEquals('9 AM', Time::fromString('09:00')->format('g A'));
+    }
+
+    /** @test */
+    public function it_can_get_hours_and_minutes()
+    {
+        $time = Time::fromString('16:30');
+        $this->assertEquals(16, $time->hours());
+        $this->assertEquals(30, $time->minutes());
+    }
+
+    /** @test */
+    public function it_can_calculate_diff()
+    {
+        $time1 = Time::fromString('16:30');
+        $time2 = Time::fromString('16:05');
+        $this->assertEquals(0, $time1->diff($time2)->h);
+        $this->assertEquals(25, $time1->diff($time2)->i);
+    }
+
+    /** @test */
+    public function it_should_not_mutate_passed_datetime()
+    {
+        $dateTime = new DateTime('2016-09-27 12:00:00');
+        $time = Time::fromString('15:00');
+        $this->assertEquals('2016-09-27 15:00:00', $time->toDateTime($dateTime)->format('Y-m-d H:i:s'));
+        $this->assertEquals('2016-09-27 12:00:00', $dateTime->format('Y-m-d H:i:s'));
+    }
+
+    /** @test */
+    public function it_should_not_mutate_passed_datetime_immutable()
+    {
+        $dateTime = new DateTimeImmutable('2016-09-27 12:00:00');
+        $time = Time::fromString('15:00');
+        $this->assertEquals('2016-09-27 15:00:00', $time->toDateTime($dateTime)->format('Y-m-d H:i:s'));
+        $this->assertEquals('2016-09-27 12:00:00', $dateTime->format('Y-m-d H:i:s'));
     }
 }

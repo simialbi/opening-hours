@@ -3,16 +3,20 @@
 namespace Spatie\OpeningHours;
 
 use DateTime;
-use DateTimeInterface;
 use DateTimeZone;
+use DateTimeImmutable;
+use DateTimeInterface;
+use Spatie\OpeningHours\Exceptions\NotSupportedException;
+use Spatie\OpeningHours\Helpers\Arr;
+use Spatie\OpeningHours\Helpers\DataTrait;
 use Spatie\OpeningHours\Exceptions\Exception;
 use Spatie\OpeningHours\Exceptions\InvalidDate;
 use Spatie\OpeningHours\Exceptions\InvalidDayName;
-use Spatie\OpeningHours\Exceptions\NotSupportedException;
-use Spatie\OpeningHours\Helpers\Arr;
 
 class OpeningHours
 {
+    use DataTrait;
+
     const RGX_RULE_MODIFIER = '/^(open|closed|off)$/i';
     const RGX_WEEK_KEY = '/^week$/';
     const RGX_WEEK_VAL = '/^([01234]?[0-9]|5[0123])(-([01234]?[0-9]|5[0123]))?(,([01234]?[0-9]|5[0123])(-([01234]?[0-9]|5[0123]))?)*:?$/';
@@ -39,10 +43,16 @@ class OpeningHours
         'November',
         'December'
     ];
+
     /** @var \Spatie\OpeningHours\Day[] */
     protected $openingHours = [];
-    /** @var array */
+
+    /** @var \Spatie\OpeningHours\OpeningHoursForDay[] */
     protected $exceptions = [];
+
+    /** @var callable[] */
+    protected $filters = [];
+
     /** @var DateTimeZone|null */
     protected $timezone = null;
 
@@ -53,6 +63,76 @@ class OpeningHours
         $this->openingHours = Day::mapDays(function () {
             return new OpeningHoursForDay();
         });
+    }
+
+    /**
+     * @param array $data
+     *
+     * @return static
+     */
+    public static function create(array $data)
+    {
+        return (new static())->fill($data);
+    }
+
+    /**
+     * @param array $data
+     *
+     * @return array
+     * @throws Exceptions\InvalidTimeRangeList
+     * @throws Exceptions\InvalidTimeRangeString
+     */
+    public static function mergeOverlappingRanges(array $data)
+    {
+        $result = [];
+        $ranges = [];
+        foreach ($data as $key => $value) {
+            $value = is_array($value)
+                ? static::mergeOverlappingRanges($value)
+                : (is_string($value) ? TimeRange::fromString($value) : $value);
+
+            if ($value instanceof TimeRange) {
+                $newRanges = [];
+                foreach ($ranges as $range) {
+                    if ($value->format() === $range->format()) {
+                        continue 2;
+                    }
+
+                    if ($value->overlaps($range) || $range->overlaps($value)) {
+                        $value = TimeRange::fromList([$value, $range]);
+
+                        continue;
+                    }
+
+                    $newRanges[] = $range;
+                }
+
+                $newRanges[] = $value;
+                $ranges = $newRanges;
+
+                continue;
+            }
+
+            $result[$key] = $value;
+        }
+
+        foreach ($ranges as $range) {
+            $result[] = $range;
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param array $data
+     *
+     * @return static
+     * @throws Exceptions\InvalidTimeRangeList
+     * @throws Exceptions\InvalidTimeRangeString
+     */
+    public static function createAndMergeOverlappingRanges(array $data)
+    {
+        return static::create(static::mergeOverlappingRanges($data));
     }
 
     /**
@@ -71,18 +151,16 @@ class OpeningHours
         }
     }
 
-    /**
-     * @param array|string $data
-     *
-     * @return static
-     */
-    public static function create($data)
+    public function setFilters(array $filters)
     {
-        if (is_string($data)) {
-            return (new static())->fromOsmString($data);
-        }
+        $this->filters = $filters;
 
-        return (new static())->fill($data);
+        return $this;
+    }
+
+    public function getFilters()
+    {
+        return $this->filters;
     }
 
     /**
@@ -90,6 +168,7 @@ class OpeningHours
      * @return static
      * @throws NotSupportedException
      * @throws InvalidDate
+     * @throws \Exception
      */
     public static function fromOsmString($osmString)
     {
@@ -388,14 +467,9 @@ class OpeningHours
         return (new static())->fill($data);
     }
 
-    /**
-     * @param array $data
-     * @return static
-     * @throws InvalidDayName
-     */
     public function fill(array $data)
     {
-        list($openingHours, $exceptions) = $this->parseOpeningHoursAndExceptions($data);
+        list($openingHours, $exceptions, $metaData, $filters) = $this->parseOpeningHoursAndExceptions($data);
 
         foreach ($openingHours as $day => $openingHoursForThisDay) {
             $this->setOpeningHoursFromStrings($day, $openingHoursForThisDay);
@@ -403,85 +477,14 @@ class OpeningHours
 
         $this->setExceptionsFromStrings($exceptions);
 
-        return $this;
+        return $this->setFilters($filters)->setData($metaData);
     }
 
-    /**
-     * @param array $data
-     * @return array
-     * @throws InvalidDayName
-     */
-    protected function parseOpeningHoursAndExceptions(array $data)
-    {
-        $exceptions = Arr::pull($data, 'exceptions', []);
-        $openingHours = [];
-
-        foreach ($data as $day => $openingHoursData) {
-            $openingHours[$this->normalizeDayName($day)] = $openingHoursData;
-        }
-
-        return [$openingHours, $exceptions];
-    }
-
-    /**
-     * @param string $day
-     * @return string
-     * @throws InvalidDayName
-     */
-    protected function normalizeDayName($day)
-    {
-        $day = strtolower($day);
-
-        if (!Day::isValid($day)) {
-            throw new InvalidDayName();
-        }
-
-        return $day;
-    }
-
-    /**
-     * @param string $day
-     * @param array $openingHours
-     * @throws InvalidDayName
-     */
-    protected function setOpeningHoursFromStrings($day, array $openingHours)
-    {
-        $day = $this->normalizeDayName($day);
-
-        $this->openingHours[$day] = OpeningHoursForDay::fromStrings($openingHours);
-    }
-
-    /**
-     * @param array $exceptions
-     */
-    protected function setExceptionsFromStrings(array $exceptions)
-    {
-        $this->exceptions = Arr::map($exceptions, function (array $openingHours, $date) {
-            $recurring = DateTime::createFromFormat('m-d', $date);
-
-            if ($recurring === false || $recurring->format('m-d') !== $date) {
-                $dateTime = DateTime::createFromFormat('Y-m-d', $date);
-
-                if ($dateTime === false || $dateTime->format('Y-m-d') !== $date) {
-                    throw InvalidDate::invalidDate($date);
-                }
-            }
-
-            return OpeningHoursForDay::fromStrings($openingHours);
-        });
-    }
-
-    /**
-     * @return array|Day[]
-     */
     public function forWeek()
     {
         return $this->openingHours;
     }
 
-    /**
-     * @return array
-     */
     public function forWeekCombined()
     {
         $equalDays = [];
@@ -496,7 +499,7 @@ class OpeningHours
 
         foreach ($uniqueOpeningHours as $uniqueDay => $uniqueValue) {
             foreach ($nonUniqueOpeningHours as $nonUniqueDay => $nonUniqueValue) {
-                if ((string)$uniqueValue === (string)$nonUniqueValue) {
+                if ((string) $uniqueValue === (string) $nonUniqueValue) {
                     $equalDays[$uniqueDay]['days'][] = $nonUniqueDay;
                 }
             }
@@ -506,7 +509,39 @@ class OpeningHours
     }
 
     /**
-     * @return array
+     * @param string $day
+     * @return Day
+     * @throws InvalidDayName
+     */
+    public function forDay(string $day)
+    {
+        $day = $this->normalizeDayName($day);
+
+        return $this->openingHours[$day];
+    }
+
+    /**
+     * @param DateTimeInterface $date
+     * @return Day|OpeningHoursForDay
+     * @throws InvalidDayName
+     */
+    public function forDate(DateTimeInterface $date)
+    {
+        $date = $this->applyTimezone($date);
+
+        foreach ($this->filters as $filter) {
+            $result = $filter($date);
+
+            if (is_array($result)) {
+                return OpeningHoursForDay::fromStrings($result);
+            }
+        }
+
+        return $this->exceptions[$date->format('Y-m-d')] ?? ($this->exceptions[$date->format('m-d')] ?? $this->forDay(Day::onDateTime($date)));
+    }
+
+    /**
+     * @return OpeningHoursForDay[]
      */
     public function exceptions()
     {
@@ -518,48 +553,25 @@ class OpeningHours
      * @return bool
      * @throws InvalidDayName
      */
-    public function isClosedOn($day)
-    {
-        return !$this->isOpenOn($day);
-    }
-
-    /**
-     * @param string $day
-     * @return bool
-     * @throws InvalidDayName
-     */
-    public function isOpenOn($day)
+    public function isOpenOn(string $day)
     {
         return count($this->forDay($day)) > 0;
     }
 
     /**
      * @param string $day
-     * @return Day[]
-     * @throws InvalidDayName
-     */
-    public function forDay($day)
-    {
-        $day = $this->normalizeDayName($day);
-
-        return $this->openingHours[$day];
-    }
-
-    /**
      * @return bool
      * @throws InvalidDayName
-     * @throws Exceptions\InvalidTimeString
      */
-    public function isOpen()
+    public function isClosedOn(string $day)
     {
-        return $this->isOpenAt(new DateTime());
+        return ! $this->isOpenOn($day);
     }
 
     /**
-     * @param DateTimeInterface|Time $dateTime
-     * @return mixed
+     * @param DateTimeInterface $dateTime
+     * @return bool
      * @throws InvalidDayName
-     * @throws Exceptions\InvalidTimeString
      */
     public function isOpenAt(DateTimeInterface $dateTime)
     {
@@ -571,40 +583,27 @@ class OpeningHours
     }
 
     /**
-     * @param DateTimeInterface $date
-     * @return DateTimeInterface
-     */
-    protected function applyTimezone(DateTimeInterface $date)
-    {
-        if ($this->timezone) {
-            /* @var $date DateTime */
-            $date = $date->setTimezone($this->timezone);
-        }
-
-        return $date;
-    }
-
-    /**
-     * @param DateTimeInterface $date
-     * @return Day|OpeningHours|Day[]
+     * @param DateTimeInterface $dateTime
+     * @return bool
      * @throws InvalidDayName
      */
-    public function forDate(DateTimeInterface $date)
+    public function isClosedAt(DateTimeInterface $dateTime)
     {
-        $date = $this->applyTimezone($date);
-
-        return isset($this->exceptions[$date->format('Y-m-d')])
-            ? $this->exceptions[$date->format('Y-m-d')]
-            : (isset($this->exceptions[$date->format('m-d')])
-                ? $this->exceptions[$date->format('m-d')]
-                : $this->forDay(Day::onDateTime($date))
-            );
+        return ! $this->isOpenAt($dateTime);
     }
 
     /**
      * @return bool
      * @throws InvalidDayName
-     * @throws Exceptions\InvalidTimeString
+     */
+    public function isOpen()
+    {
+        return $this->isOpenAt(new DateTime());
+    }
+
+    /**
+     * @return bool
+     * @throws InvalidDayName
      */
     public function isClosed()
     {
@@ -613,31 +612,20 @@ class OpeningHours
 
     /**
      * @param DateTimeInterface $dateTime
-     * @return bool
+     * @return DateTimeImmutable|DateTimeInterface|false
      * @throws InvalidDayName
-     * @throws Exceptions\InvalidTimeString
-     */
-    public function isClosedAt(DateTimeInterface $dateTime)
-    {
-        return !$this->isOpenAt($dateTime);
-    }
-
-    /**
-     * @param DateTimeInterface|Time $dateTime
-     * @return DateTimeInterface
-     * @throws InvalidDayName
-     * @throws Exceptions\InvalidTimeString
      */
     public function nextOpen(DateTimeInterface $dateTime)
     {
+        if (! ($dateTime instanceof DateTimeImmutable)) {
+            $dateTime = clone $dateTime;
+        }
+
         $openingHoursForDay = $this->forDate($dateTime);
         $nextOpen = $openingHoursForDay->nextOpen(Time::fromDateTime($dateTime));
 
-        /* @var $dateTime DateTime */
-        /* @var $nextOpen Time */
-
-        while ($nextOpen == false) {
-            $dateTime
+        while ($nextOpen === false) {
+            $dateTime = $dateTime
                 ->modify('+1 day')
                 ->setTime(0, 0, 0);
 
@@ -647,17 +635,39 @@ class OpeningHours
         }
 
         $nextDateTime = $nextOpen->toDateTime();
-        $dateTime->setTime($nextDateTime->format('G'), $nextDateTime->format('i'), 0);
+        $dateTime = $dateTime->setTime($nextDateTime->format('G'), $nextDateTime->format('i'), 0);
 
         return $dateTime;
     }
 
     /**
-     * @return array
+     * @param DateTimeInterface $dateTime
+     * @return DateTimeImmutable|DateTimeInterface|false
+     * @throws InvalidDayName
      */
-    public function regularClosingDaysISO()
+    public function nextClose(DateTimeInterface $dateTime)
     {
-        return Arr::map($this->regularClosingDays(), [Day::class, 'toISO']);
+        if (! ($dateTime instanceof DateTimeImmutable)) {
+            $dateTime = clone $dateTime;
+        }
+
+        $openingHoursForDay = $this->forDate($dateTime);
+        $nextClose = $openingHoursForDay->nextClose(Time::fromDateTime($dateTime));
+
+        while ($nextClose === false) {
+            $dateTime = $dateTime
+                ->modify('+1 day')
+                ->setTime(0, 0, 0);
+
+            $openingHoursForDay = $this->forDate($dateTime);
+
+            $nextClose = $openingHoursForDay->nextClose(Time::fromDateTime($dateTime));
+        }
+
+        $nextDateTime = $nextClose->toDateTime();
+        $dateTime = $dateTime->setTime($nextDateTime->format('G'), $nextDateTime->format('i'), 0);
+
+        return $dateTime;
     }
 
     /**
@@ -671,12 +681,11 @@ class OpeningHours
     }
 
     /**
-     * @param callable $callback
      * @return array
      */
-    public function filter(callable $callback)
+    public function regularClosingDaysISO()
     {
-        return Arr::filter($this->openingHours, $callback);
+        return Arr::map($this->regularClosingDays(), [Day::class, 'toISO']);
     }
 
     /**
@@ -694,20 +703,116 @@ class OpeningHours
     }
 
     /**
-     * @param callable $callback
-     * @return array
-     */
-    public function filterExceptions(callable $callback)
-    {
-        return Arr::filter($this->exceptions, $callback);
-    }
-
-    /**
      * @param $timezone
      */
     public function setTimezone($timezone)
     {
         $this->timezone = new DateTimeZone($timezone);
+    }
+
+    /**
+     * @param array $data
+     * @return array
+     * @throws InvalidDayName
+     */
+    protected function parseOpeningHoursAndExceptions(array $data)
+    {
+        $metaData = Arr::pull($data, 'data', null);
+        $exceptions = [];
+        $filters = Arr::pull($data, 'filters', []);
+        foreach (Arr::pull($data, 'exceptions', []) as $key => $exception) {
+            if (is_callable($exception)) {
+                $filters[] = $exception;
+
+                continue;
+            }
+
+            $exceptions[$key] = $exception;
+        }
+        $openingHours = [];
+
+        foreach ($data as $day => $openingHoursData) {
+            $openingHours[$this->normalizeDayName($day)] = $openingHoursData;
+        }
+
+        return [$openingHours, $exceptions, $metaData, $filters];
+    }
+
+    /**
+     * @param string $day
+     * @param array $openingHours
+     * @throws InvalidDayName
+     */
+    protected function setOpeningHoursFromStrings(string $day, array $openingHours)
+    {
+        $day = $this->normalizeDayName($day);
+
+        $data = null;
+
+        if (isset($openingHours['data'])) {
+            $data = $openingHours['data'];
+            unset($openingHours['data']);
+        }
+
+        $this->openingHours[$day] = OpeningHoursForDay::fromStrings($openingHours)->setData($data);
+    }
+
+    /**
+     * @param array $exceptions
+     */
+    protected function setExceptionsFromStrings(array $exceptions)
+    {
+        $this->exceptions = Arr::map($exceptions, function (array $openingHours, string $date) {
+            $recurring = DateTime::createFromFormat('m-d', $date);
+
+            if ($recurring === false || $recurring->format('m-d') !== $date) {
+                $dateTime = DateTime::createFromFormat('Y-m-d', $date);
+
+                if ($dateTime === false || $dateTime->format('Y-m-d') !== $date) {
+                    throw InvalidDate::invalidDate($date);
+                }
+            }
+
+            return OpeningHoursForDay::fromStrings($openingHours);
+        });
+    }
+
+    /**
+     * @param string $day
+     * @return string
+     * @throws InvalidDayName
+     */
+    protected function normalizeDayName(string $day)
+    {
+        $day = strtolower($day);
+
+        if (! Day::isValid($day)) {
+            throw InvalidDayName::invalidDayName($day);
+        }
+
+        return $day;
+    }
+
+    /**
+     * @param DateTimeInterface $date
+     * @return DateTimeInterface
+     */
+    protected function applyTimezone(DateTimeInterface $date)
+    {
+        if ($this->timezone) {
+            $date = $date->setTimezone($this->timezone);
+        }
+
+        return $date;
+    }
+
+    /**
+     * @param callable $callback
+     * @return array
+     */
+    public function filter(callable $callback)
+    {
+        return Arr::filter($this->openingHours, $callback);
     }
 
     /**
@@ -723,58 +828,6 @@ class OpeningHours
      * @param callable $callback
      * @return array
      */
-    public function mapExceptions(callable $callback)
-    {
-        return Arr::map($this->exceptions, $callback);
-    }
-
-    /**
-     * @return array
-     */
-    public function asStructuredData()
-    {
-        $regularHours = $this->flatMap(function (OpeningHoursForDay $openingHoursForDay, $day) {
-            return $openingHoursForDay->map(function (TimeRange $timeRange) use ($day) {
-                return [
-                    '@type' => 'OpeningHoursSpecification',
-                    'dayOfWeek' => ucfirst($day),
-                    'opens' => (string)$timeRange->start(),
-                    'closes' => (string)$timeRange->end(),
-                ];
-            });
-        });
-
-        $exceptions = $this->flatMapExceptions(function (OpeningHoursForDay $openingHoursForDay, $date) {
-            if ($openingHoursForDay->isEmpty()) {
-                return [
-                    [
-                        '@type' => 'OpeningHoursSpecification',
-                        'opens' => '00:00',
-                        'closes' => '00:00',
-                        'validFrom' => $date,
-                        'validThrough' => $date,
-                    ]
-                ];
-            }
-
-            return $openingHoursForDay->map(function (TimeRange $timeRange) use ($date) {
-                return [
-                    '@type' => 'OpeningHoursSpecification',
-                    'opens' => $timeRange->start(),
-                    'closes' => $timeRange->end(),
-                    'validFrom' => $date,
-                    'validThrough' => $date,
-                ];
-            });
-        });
-
-        return array_merge($regularHours, $exceptions);
-    }
-
-    /**
-     * @param callable $callback
-     * @return array
-     */
     public function flatMap(callable $callback)
     {
         return Arr::flatMap($this->openingHours, $callback);
@@ -784,8 +837,67 @@ class OpeningHours
      * @param callable $callback
      * @return array
      */
+    public function filterExceptions(callable $callback)
+    {
+        return Arr::filter($this->exceptions, $callback);
+    }
+
+    /**
+     * @param callable $callback
+     * @return array
+     */
+    public function mapExceptions(callable $callback)
+    {
+        return Arr::map($this->exceptions, $callback);
+    }
+
+    /**
+     * @param callable $callback
+     * @return array
+     */
     public function flatMapExceptions(callable $callback)
     {
         return Arr::flatMap($this->exceptions, $callback);
+    }
+
+    /**
+     * @return array
+     */
+    public function asStructuredData()
+    {
+        $regularHours = $this->flatMap(function (OpeningHoursForDay $openingHoursForDay, string $day) {
+            return $openingHoursForDay->map(function (TimeRange $timeRange) use ($day) {
+                return [
+                    '@type' => 'OpeningHoursSpecification',
+                    'dayOfWeek' => ucfirst($day),
+                    'opens' => (string) $timeRange->start(),
+                    'closes' => (string) $timeRange->end(),
+                ];
+            });
+        });
+
+        $exceptions = $this->flatMapExceptions(function (OpeningHoursForDay $openingHoursForDay, string $date) {
+            if ($openingHoursForDay->isEmpty()) {
+                return [[
+                    '@type' => 'OpeningHoursSpecification',
+                    'opens' => '00:00',
+                    'closes' => '00:00',
+                    'validFrom' => $date,
+                    'validThrough' => $date,
+                ]];
+            }
+
+            return $openingHoursForDay->map(function (TimeRange $timeRange) use ($date) {
+                return [
+                    '@type' => 'OpeningHoursSpecification',
+                    'opens' => (string) $timeRange->start(),
+                    'closes' => (string) $timeRange->end(),
+                    'validFrom' => $date,
+                    'validThrough' => $date,
+                ];
+            });
+        });
+
+        return array_merge($regularHours, $exceptions);
     }
 }

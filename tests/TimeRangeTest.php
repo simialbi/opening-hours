@@ -2,17 +2,19 @@
 
 namespace Spatie\OpeningHours\Test;
 
-use PHPUnit\Framework\TestCase;
-use Spatie\OpeningHours\Exceptions\InvalidTimeRangeString;
 use Spatie\OpeningHours\Time;
+use PHPUnit\Framework\TestCase;
 use Spatie\OpeningHours\TimeRange;
+use Spatie\OpeningHours\Exceptions\InvalidTimeRangeList;
+use Spatie\OpeningHours\Exceptions\InvalidTimeRangeArray;
+use Spatie\OpeningHours\Exceptions\InvalidTimeRangeString;
 
 class TimeRangeTest extends TestCase
 {
     /** @test */
     public function it_can_be_created_from_a_string()
     {
-        $this->assertEquals('16:00-18:00', (string)TimeRange::fromString('16:00-18:00'));
+        $this->assertEquals('16:00-18:00', (string) TimeRange::fromString('16:00-18:00'));
     }
 
     /** @test */
@@ -21,6 +23,32 @@ class TimeRangeTest extends TestCase
         $this->expectException(InvalidTimeRangeString::class);
 
         TimeRange::fromString('16:00/18:00');
+    }
+
+    /** @test */
+    public function it_will_throw_an_exception_when_passing_a_invalid_array()
+    {
+        $this->expectException(InvalidTimeRangeArray::class);
+
+        TimeRange::fromArray([]);
+    }
+
+    /** @test */
+    public function it_will_throw_an_exception_when_passing_a_empty_array_to_list()
+    {
+        $this->expectException(InvalidTimeRangeList::class);
+
+        TimeRange::fromList([]);
+    }
+
+    /** @test */
+    public function it_will_throw_an_exception_when_passing_a_invalid_array_to_list()
+    {
+        $this->expectException(InvalidTimeRangeList::class);
+
+        TimeRange::fromList([
+            'foo',
+        ]);
     }
 
     /** @test */
@@ -50,6 +78,10 @@ class TimeRangeTest extends TestCase
         $this->assertTrue(TimeRange::fromString('18:00-01:00')->containsTime(Time::fromString('22:00')));
         $this->assertFalse(TimeRange::fromString('18:00-01:00')->containsTime(Time::fromString('17:00')));
         $this->assertFalse(TimeRange::fromString('18:00-01:00')->containsTime(Time::fromString('02:00')));
+
+        $this->assertTrue(TimeRange::fromString('18:00-01:00')->containsTime(Time::fromString('18:00')));
+        $this->assertTrue(TimeRange::fromString('18:00-01:00')->containsTime(Time::fromString('00:59')));
+        $this->assertFalse(TimeRange::fromString('18:00-01:00')->containsTime(Time::fromString('01:00')));
     }
 
     /** @test */

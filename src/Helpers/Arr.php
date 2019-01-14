@@ -25,7 +25,7 @@ class Arr
      */
     public static function flatMap(array $array, callable $callback)
     {
-        $mapped = self::map($array, $callback);
+        $mapped = static::map($array, $callback);
 
         $flattened = [];
 
